@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PA Teacher Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: sans-serif;
+    }
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 100%;
+      z-index: 0;
+    }
+    #sidebar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 320px;
+      height: 100%;
+      background: #fff;
+      overflow-y: auto;
+      padding: 15px;
+      border-left: 1px solid #ccc;
+      z-index: 1000;
+    }
+    #search {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1100;
+      background: white;
+      padding: 5px;
+      border: 1px solid #ccc;
+    }
+    #sidebar ul {
+      padding-left: 1em;
+    }
+    #sidebar li {
+      margin-bottom: 0.8em;
+      list-style-type: none;
+    }
+    .teacher {
+      color: #0077cc;
+    }
+    .admin {
+      color: #cc5500;
+      font-weight: bold;
+    }
+    .badge {
+      font-size: 0.75em;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="search">
+    <input type="text" id="searchBox" placeholder="Search name, county, district...">
+  </div>
+  <div id="map"></div>
+  <div id="sidebar">
+    <h2>Welcome!</h2>
+    <p>Click a county to explore educator data or use the search bar above to filter by name, county, or district.</p>
+    <p><strong>Legend:</strong></p>
+    <ul>
+      <li><span class="badge teacher">🔹</span> Classroom Teacher</li>
+      <li><span class="badge admin">🔶</span> Administrator / Coordinator</li>
+    </ul>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([40.9, -77.6], 7);
+
+    const light = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors & Carto'
+    }).addTo(map);
+
+    let detailedData = {};
+
+    fetch('pa_teacher_detailed_by_county.json')
+      .then(res => res.json())
+      .then(data => {
+        detailedData = data;
+        return fetch('PaCounty2025_04.geojson');
+      })
+      .then(res => res.json())
+      .then(geojson => {
+        L.geoJSON(geojson, {
+          style: {
+            color: '#333', weight: 1, fillColor: '#7bccc4', fillOpacity: 0.6
+          },
+          onEachFeature: (feature, layer) => {
+            const county = feature.properties.COUNTY_NAM;
+            layer.on('click', () => showSidebar(county));
+          }
+        }).addTo(map);
+      });
+
+    function showSidebar(county) {
+      const sidebar = document.getElementById('sidebar');
+      const staff = detailedData[county] || detailedData[county.toUpperCase()] || detailedData[county.toLowerCase()];
+      if (!staff) {
+        sidebar.innerHTML = `<h2>${county}</h2><p>No data available.</p>`;
+      } else {
+        const total = staff.length;
+        const teachers = staff.filter(p => p.category === "Classroom Teachers").length;
+        const admins = staff.filter(p => p.role.toLowerCase().includes("admin") || p.category.includes("Coordinator")).length;
+
+        const avgTeacher = avg(staff.filter(p => p.category === "Classroom Teachers").map(p => p.salary));
+        const avgAdmin = avg(staff.filter(p => p.role.toLowerCase().includes("admin") || p.category.includes("Coordinator")).map(p => p.salary));
+
+        let html = `<h2>${county} County</h2>
+          <p>Total Staff: ${total}</p>
+          <p>Teachers: ${teachers}</p>
+          <p>Admins/Coordinators: ${admins}</p>
+          <p>Avg Teacher Salary: $${avgTeacher.toLocaleString()}</p>
+          <p>Avg Admin Salary: $${avgAdmin.toLocaleString()}</p>
+          <hr><ul>`;
+        html += staff.map(p => {
+          const isAdmin = p.role.toLowerCase().includes("admin") || p.category.includes("Coordinator");
+          const badge = isAdmin ? '🔶' : '🔹';
+          const cssClass = isAdmin ? 'admin' : 'teacher';
+          return `<li class="${cssClass}"><span class="badge">${badge}</span><b>${p.full_name}</b><br>${p.role}, $${p.salary.toLocaleString()}<br><small>${p.district}</small></li>`;
+        }).join('');
+        html += '</ul>';
+        sidebar.innerHTML = html;
+      }
+      setTimeout(() => map.invalidateSize(), 200);
+    }
+
+    function avg(arr) {
+      if (!arr.length) return 0;
+      return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+    }
+
+    document.getElementById('searchBox').addEventListener('input', function(e) {
+      const q = e.target.value.toLowerCase();
+      const results = [];
+      for (const [county, staff] of Object.entries(detailedData)) {
+        for (const person of staff) {
+          if (
+            person.full_name.toLowerCase().includes(q) ||
+            person.district.toLowerCase().includes(q) ||
+            county.toLowerCase().includes(q)
+          ) {
+            results.push({ county, person });
+          }
+        }
+      }
+      const sidebar = document.getElementById('sidebar');
+      if (results.length === 0) {
+        sidebar.innerHTML = `<p>No matches found.</p>`;
+      } else {
+        let html = `<h2>Search Results (${results.length})</h2><ul>`;
+        html += results.map(r => {
+          const isAdmin = r.person.role.toLowerCase().includes("admin") || r.person.category.includes("Coordinator");
+          const badge = isAdmin ? '🔶' : '🔹';
+          const cssClass = isAdmin ? 'admin' : 'teacher';
+          return `<li class="${cssClass}"><span class="badge">${badge}</span><b>${r.person.full_name}</b><br>${r.person.role}, $${r.person.salary.toLocaleString()}<br><small>${r.county} / ${r.person.district}</small></li>`;
+        }).join('');
+        html += '</ul>';
+        sidebar.innerHTML = html;
+      }
+    });
+  </script>
+</body>
+</html>
