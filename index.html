@@ -70,8 +70,8 @@
     <p>Click a county to explore educator data or use the search bar above to filter by name, county, or district.</p>
     <p><strong>Legend:</strong></p>
     <ul>
-      <li><span class="badge teacher">🔹</span> Classroom Teacher</li>
-      <li><span class="badge admin">🔶</span> Administrator / Coordinator</li>
+      <li><span class="badge teacher">👨‍🏫</span> Classroom Teacher</li>
+      <li><span class="badge admin">👩‍💼</span> Administrator / Coordinator</li>
     </ul>
   </div>
 
@@ -85,28 +85,45 @@
 
     let detailedData = {};
 
-    fetch('pa_teacher_detailed_by_county.json')
-      .then(res => res.json())
-      .then(data => {
-        detailedData = data;
-        return fetch('PaCounty2025_04.geojson');
+    // Load both files at the same time and handle potential errors
+    Promise.all([
+      fetch('pa_teacher_detailed_by_county.json').then(res => {
+          if (!res.ok) throw new Error(`Teacher JSON failed: ${res.statusText}`);
+          return res.json();
+      }),
+      fetch('PaCounty2025_04.geojson').then(res => {
+          if (!res.ok) throw new Error(`GeoJSON failed: ${res.statusText}`);
+          return res.json();
       })
-      .then(res => res.json())
-      .then(geojson => {
-        L.geoJSON(geojson, {
-          style: {
-            color: '#333', weight: 1, fillColor: '#7bccc4', fillOpacity: 0.6
-          },
-          onEachFeature: (feature, layer) => {
-            const county = feature.properties.COUNTY_NAM;
-            layer.on('click', () => showSidebar(county));
-          }
-        }).addTo(map);
-      });
+    ])
+    .then(([teacherData, geojsonData]) => {
+      // Both files loaded successfully
+      detailedData = teacherData;
+
+      L.geoJSON(geojsonData, {
+        style: {
+          color: '#333', weight: 1, fillColor: '#7bccc4', fillOpacity: 0.6
+        },
+        onEachFeature: (feature, layer) => {
+          const county = feature.properties.COUNTY_NAM;
+          layer.on('click', () => showSidebar(county));
+        }
+      }).addTo(map);
+    })
+    .catch(error => {
+      // Catch any errors and display them in the sidebar
+      console.error("Data loading error:", error);
+      document.getElementById('sidebar').innerHTML = `
+        <h2 style="color: red;">Error Loading Data</h2>
+        <p>The map boundaries or teacher data failed to load.</p>
+        <p><b>Developer note:</b> If you opened this file directly in your browser (your URL starts with <code>file:///</code>), the browser is likely blocking the data files for security reasons. You must run this through a local web server.</p>
+        <p><small>${error.message}</small></p>`;
+    });
 
     function showSidebar(county) {
       const sidebar = document.getElementById('sidebar');
       const staff = detailedData[county] || detailedData[county.toUpperCase()] || detailedData[county.toLowerCase()];
+      
       if (!staff) {
         sidebar.innerHTML = `<h2>${county}</h2><p>No data available.</p>`;
       } else {
@@ -124,12 +141,14 @@
           <p>Avg Teacher Salary: $${avgTeacher.toLocaleString()}</p>
           <p>Avg Admin Salary: $${avgAdmin.toLocaleString()}</p>
           <hr><ul>`;
+          
         html += staff.map(p => {
           const isAdmin = p.role.toLowerCase().includes("admin") || p.category.includes("Coordinator");
-          const badge = isAdmin ? '🔶' : '🔹';
+          const badge = isAdmin ? '👩‍💼' : '👨‍🏫';
           const cssClass = isAdmin ? 'admin' : 'teacher';
           return `<li class="${cssClass}"><span class="badge">${badge}</span><b>${p.full_name}</b><br>${p.role}, $${p.salary.toLocaleString()}<br><small>${p.district}</small></li>`;
         }).join('');
+        
         html += '</ul>';
         sidebar.innerHTML = html;
       }
@@ -155,6 +174,7 @@
           }
         }
       }
+      
       const sidebar = document.getElementById('sidebar');
       if (results.length === 0) {
         sidebar.innerHTML = `<p>No matches found.</p>`;
@@ -162,17 +182,14 @@
         let html = `<h2>Search Results (${results.length})</h2><ul>`;
         html += results.map(r => {
           const isAdmin = r.person.role.toLowerCase().includes("admin") || r.person.category.includes("Coordinator");
-          const badge = isAdmin ? '🔶' : '🔹';
+          const badge = isAdmin ? '👩‍💼' : '👨‍🏫';
           const cssClass = isAdmin ? 'admin' : 'teacher';
           return `<li class="${cssClass}"><span class="badge">${badge}</span><b>${r.person.full_name}</b><br>${r.person.role}, $${r.person.salary.toLocaleString()}<br><small>${r.county} / ${r.person.district}</small></li>`;
         }).join('');
         html += '</ul>';
         sidebar.innerHTML = html;
-
       }
     });
   </script>
 </body>
 </html>
-
-
